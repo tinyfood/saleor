@@ -42,6 +42,7 @@ export enum LanguageCodeEnum {
   DE = "DE",
   EN = "EN",
   ES = "ES",
+  ES_CO = "ES_CO",
   ET = "ET",
   FA = "FA",
   FR = "FR",
@@ -52,6 +53,7 @@ export enum LanguageCodeEnum {
   IT = "IT",
   JA = "JA",
   KO = "KO",
+  LT = "LT",
   MN = "MN",
   NB = "NB",
   NL = "NL",
@@ -61,6 +63,7 @@ export enum LanguageCodeEnum {
   RO = "RO",
   RU = "RU",
   SK = "SK",
+  SQ = "SQ",
   SR = "SR",
   SV = "SV",
   SW = "SW",
@@ -241,6 +244,11 @@ export interface AttributeCreateInput {
   values?: (AttributeValueCreateInput | null)[] | null;
 }
 
+export interface AttributeInput {
+  slug: string;
+  value: string;
+}
+
 export interface AttributeUpdateInput {
   name?: string | null;
   removeValues?: (string | null)[] | null;
@@ -415,6 +423,22 @@ export interface PageTranslationInput {
   title?: string | null;
   content?: string | null;
   contentJson?: any | null;
+}
+
+export interface PriceRangeInput {
+  gte?: number | null;
+  lte?: number | null;
+}
+
+export interface ProductFilterInput {
+  isPublished?: boolean | null;
+  collections?: (string | null)[] | null;
+  categories?: (string | null)[] | null;
+  price?: PriceRangeInput | null;
+  attributes?: (AttributeInput | null)[] | null;
+  stockAvailability?: StockAvailability | null;
+  productType?: string | null;
+  search?: string | null;
 }
 
 export interface ProductTypeInput {
