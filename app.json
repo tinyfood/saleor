@@ -1,13 +1,17 @@
 {
-  "name": "saleor",
-  "description": "An e-commerce storefront for Python and Django",
-  "repository": "https://github.com/mirumee/saleor",
-  "website": "http://getsaleor.com/",
-  "logo": "https://mirumee.com/img/opensource-saleor.png",
+  "name": "tinyfood",
+  "description": "A community food network system",
+  "repository": "https://github.com/tinyfood/saleor",
+  "website": "http://tinyfood.org/",
+  "logo": "https://tinyfood.github.io/logo.svg",
   "keywords": [
     "saleor",
+    "tinyfood",
+    "food network",
+    "food hub",
     "e-commerce",
-    "django"
+    "django",
+    "typescript"
   ],
   "image": "heroku/python",
   "env": {
