@@ -1,9 +1,9 @@
 import Button from "@material-ui/core/Button";
 import Card from "@material-ui/core/Card";
 import CardContent from "@material-ui/core/CardContent";
-import * as React from "react";
+import React from "react";
 
-import CardTitle from "../../../components/CardTitle";
+import CardTitle from "@saleor/components/CardTitle";
 import i18n from "../../../i18n";
 import { maybe } from "../../../misc";
 import { OrderDetails_order } from "../../types/OrderDetails";

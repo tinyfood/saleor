@@ -1,9 +1,9 @@
 import TextField from "@material-ui/core/TextField";
 import Typography from "@material-ui/core/Typography";
-import * as React from "react";
+import React from "react";
 
-import { ConfirmButtonTransitionState } from "../../../components/ConfirmButton";
-import Form from "../../../components/Form";
+import { ConfirmButtonTransitionState } from "@saleor/components/ConfirmButton";
+import Form from "@saleor/components/Form";
 import i18n from "../../../i18n";
 import TranslationFieldsSave from "./TranslationFieldsSave";
 

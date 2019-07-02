@@ -2,7 +2,7 @@
 /* eslint-disable */
 // This file was automatically generated and should not be edited.
 
-import { AttributeValueInput } from "./../../types/globalTypes";
+import { AttributeValueInput, SeoInput } from "./../../types/globalTypes";
 
 // ====================================================
 // GraphQL mutation operation: ProductUpdate
@@ -120,7 +120,7 @@ export interface ProductUpdate_productUpdate_product_images {
   __typename: "ProductImage";
   id: string;
   alt: string;
-  sortOrder: number;
+  sortOrder: number | null;
   url: string;
 }
 
@@ -194,4 +194,5 @@ export interface ProductUpdateVariables {
   isPublished: boolean;
   name?: string | null;
   basePrice?: any | null;
+  seo?: SeoInput | null;
 }

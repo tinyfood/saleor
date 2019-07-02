@@ -15,14 +15,14 @@ import TableCell from "@material-ui/core/TableCell";
 import TableHead from "@material-ui/core/TableHead";
 import TableRow from "@material-ui/core/TableRow";
 import TextField from "@material-ui/core/TextField";
-import * as React from "react";
+import React from "react";
 
 import ConfirmButton, {
   ConfirmButtonTransitionState
-} from "../../../components/ConfirmButton/ConfirmButton";
-import Form from "../../../components/Form";
-import { FormSpacer } from "../../../components/FormSpacer";
-import TableCellAvatar from "../../../components/TableCellAvatar";
+} from "@saleor/components/ConfirmButton";
+import Form from "@saleor/components/Form";
+import { FormSpacer } from "@saleor/components/FormSpacer";
+import TableCellAvatar from "@saleor/components/TableCellAvatar";
 import i18n from "../../../i18n";
 import { maybe } from "../../../misc";
 import { OrderDetails_order_lines } from "../../types/OrderDetails";
@@ -73,7 +73,7 @@ const OrderFulfillmentDialog = withStyles(styles, {
     onClose,
     onSubmit
   }: OrderFulfillmentDialogProps) => (
-    <Dialog open={open}>
+    <Dialog onClose={onClose} open={open}>
       <Form
         initial={{
           lines: maybe(

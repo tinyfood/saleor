@@ -13,10 +13,10 @@ import TableCell from "@material-ui/core/TableCell";
 import TableHead from "@material-ui/core/TableHead";
 import TableRow from "@material-ui/core/TableRow";
 import DeleteIcon from "@material-ui/icons/Delete";
-import * as React from "react";
+import React from "react";
 
-import CardTitle from "../../../components/CardTitle";
-import Skeleton from "../../../components/Skeleton";
+import CardTitle from "@saleor/components/CardTitle";
+import Skeleton from "@saleor/components/Skeleton";
 import i18n from "../../../i18n";
 import {
   maybe,

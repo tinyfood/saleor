@@ -1,4 +1,4 @@
-import * as placeholderImage from "../../images/placeholder60x60.png";
+import placeholderImage from "../../images/placeholder60x60.png";
 import {
   SaleType,
   VoucherDiscountValueType,
@@ -297,7 +297,7 @@ export const voucherDetails: VoucherDetails_voucher = {
     totalCount: 0
   },
   startDate: "2018-11-27",
-  type: VoucherType.VALUE,
+  type: VoucherType.ENTIRE_ORDER,
   usageLimit: null,
   used: 0
 };

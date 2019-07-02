@@ -1,10 +1,10 @@
 import Button from "@material-ui/core/Button";
 import Card from "@material-ui/core/Card";
 import AddIcon from "@material-ui/icons/Add";
-import * as React from "react";
+import React from "react";
 
-import Container from "../../../components/Container";
-import PageHeader from "../../../components/PageHeader";
+import Container from "@saleor/components/Container";
+import PageHeader from "@saleor/components/PageHeader";
 import i18n from "../../../i18n";
 import { ListActions, PageListProps } from "../../../types";
 import { OrderDraftList_draftOrders_edges_node } from "../../types/OrderDraftList";

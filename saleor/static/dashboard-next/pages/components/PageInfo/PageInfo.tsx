@@ -2,11 +2,11 @@ import Card from "@material-ui/core/Card";
 import CardContent from "@material-ui/core/CardContent";
 import { createStyles, withStyles, WithStyles } from "@material-ui/core/styles";
 import TextField from "@material-ui/core/TextField";
-import * as React from "react";
+import React from "react";
 
-import CardTitle from "../../../components/CardTitle";
-import FormSpacer from "../../../components/FormSpacer";
-import RichTextEditor from "../../../components/RichTextEditor";
+import CardTitle from "@saleor/components/CardTitle";
+import FormSpacer from "@saleor/components/FormSpacer";
+import RichTextEditor from "@saleor/components/RichTextEditor";
 import i18n from "../../../i18n";
 import { maybe } from "../../../misc";
 import { FormErrors } from "../../../types";

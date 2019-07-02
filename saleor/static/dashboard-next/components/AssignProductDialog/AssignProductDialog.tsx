@@ -10,15 +10,14 @@ import TableBody from "@material-ui/core/TableBody";
 import TableCell from "@material-ui/core/TableCell";
 import TableRow from "@material-ui/core/TableRow";
 import TextField from "@material-ui/core/TextField";
-import * as React from "react";
+import React from "react";
 
 import ConfirmButton, {
   ConfirmButtonTransitionState
-} from "../../components/ConfirmButton/ConfirmButton";
-import Debounce from "../../components/Debounce";
-import Form from "../../components/Form";
-import FormSpacer from "../../components/FormSpacer";
-import TableCellAvatar from "../../components/TableCellAvatar";
+} from "@saleor/components/ConfirmButton";
+import Form from "@saleor/components/Form";
+import FormSpacer from "@saleor/components/FormSpacer";
+import TableCellAvatar from "@saleor/components/TableCellAvatar";
 import { SearchProducts_products_edges_node } from "../../containers/SearchProducts/types/SearchProducts";
 import i18n from "../../i18n";
 import { maybe } from "../../misc";
@@ -74,6 +73,7 @@ const AssignProductDialog = withStyles(styles, {
     onSubmit
   }: AssignProductDialogProps) => (
     <Dialog
+      onClose={onClose}
       open={open}
       classes={{ paper: classes.overflow }}
       fullWidth
@@ -84,29 +84,25 @@ const AssignProductDialog = withStyles(styles, {
           <>
             <DialogTitle>{i18n.t("Assign Product")}</DialogTitle>
             <DialogContent className={classes.overflow}>
-              <Debounce debounceFn={onFetch}>
-                {fetch => (
-                  <TextField
-                    name="query"
-                    value={data.query}
-                    onChange={event => change(event, () => fetch(data.query))}
-                    label={i18n.t("Search Products", {
-                      context: "product search input label"
-                    })}
-                    placeholder={i18n.t(
-                      "Search by product name, attribute, product type etc...",
-                      {
-                        context: "product search input placeholder"
-                      }
-                    )}
-                    fullWidth
-                    InputProps={{
-                      autoComplete: "off",
-                      endAdornment: loading && <CircularProgress size={16} />
-                    }}
-                  />
+              <TextField
+                name="query"
+                value={data.query}
+                onChange={event => change(event, () => onFetch(data.query))}
+                label={i18n.t("Search Products", {
+                  context: "product search input label"
+                })}
+                placeholder={i18n.t(
+                  "Search by product name, attribute, product type etc...",
+                  {
+                    context: "product search input placeholder"
+                  }
                 )}
-              </Debounce>
+                fullWidth
+                InputProps={{
+                  autoComplete: "off",
+                  endAdornment: loading && <CircularProgress size={16} />
+                }}
+              />
               <FormSpacer />
               <Table>
                 <TableBody>

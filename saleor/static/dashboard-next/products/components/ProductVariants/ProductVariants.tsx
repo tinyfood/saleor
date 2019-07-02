@@ -13,14 +13,14 @@ import TableBody from "@material-ui/core/TableBody";
 import TableCell from "@material-ui/core/TableCell";
 import TableRow from "@material-ui/core/TableRow";
 import Typography from "@material-ui/core/Typography";
-import * as React from "react";
+import React from "react";
 
-import CardTitle from "../../../components/CardTitle";
-import Checkbox from "../../../components/Checkbox";
-import Money from "../../../components/Money";
-import Skeleton from "../../../components/Skeleton";
-import StatusLabel from "../../../components/StatusLabel";
-import TableHead from "../../../components/TableHead";
+import CardTitle from "@saleor/components/CardTitle";
+import Checkbox from "@saleor/components/Checkbox";
+import Money from "@saleor/components/Money";
+import Skeleton from "@saleor/components/Skeleton";
+import StatusLabel from "@saleor/components/StatusLabel";
+import TableHead from "@saleor/components/TableHead";
 import i18n from "../../../i18n";
 import { renderCollection } from "../../../misc";
 import { ListActions } from "../../../types";
@@ -145,10 +145,7 @@ export const ProductVariants = withStyles(styles, { name: "ProductVariants" })(
                     <Checkbox
                       checked={isSelected}
                       disabled={disabled}
-                      onClick={event => {
-                        toggle(variant.id);
-                        event.stopPropagation();
-                      }}
+                      onChange={() => toggle(variant.id)}
                     />
                   </TableCell>
                   <TableCell className={classes.colName}>

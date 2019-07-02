@@ -21,6 +21,7 @@ from saleor.checkout.views import clear_checkout, update_checkout_line
 from saleor.core.exceptions import InsufficientStock
 from saleor.core.utils.taxes import ZERO_TAXED_MONEY
 from saleor.discount.models import Sale
+from saleor.product.models import Category
 from saleor.shipping.utils import get_shipping_price_estimate
 
 
@@ -315,6 +316,109 @@ def test_get_prices_of_discounted_products(checkout_with_item):
     assert list(prices) == excepted_value
 
 
+def test_get_prices_of_discounted_specific_product(
+    checkout_with_item, collection, voucher_specific_product_type
+):
+    checkout = checkout_with_item
+    voucher = voucher_specific_product_type
+    line = checkout.lines.first()
+    product = line.variant.product
+    category = product.category
+
+    product.collections.add(collection)
+    voucher.products.add(product)
+    voucher.collections.add(collection)
+    voucher.categories.add(category)
+
+    prices = utils.get_prices_of_discounted_specific_product(checkout, voucher)
+
+    excepted_value = [line.variant.get_price() for item in range(line.quantity)]
+
+    assert prices == excepted_value
+
+
+def test_get_prices_of_discounted_specific_product_only_product(
+    checkout_with_item, voucher_specific_product_type, product_with_default_variant
+):
+    checkout = checkout_with_item
+    voucher = voucher_specific_product_type
+    line = checkout.lines.first()
+    product = line.variant.product
+    product2 = product_with_default_variant
+
+    add_variant_to_checkout(checkout, product2.variants.get(), 1)
+    voucher.products.add(product)
+
+    prices = utils.get_prices_of_discounted_specific_product(checkout, voucher)
+
+    excepted_value = [line.variant.get_price() for item in range(line.quantity)]
+
+    assert checkout.lines.count() > 1
+    assert prices == excepted_value
+
+
+def test_get_prices_of_discounted_specific_product_only_collection(
+    checkout_with_item,
+    collection,
+    voucher_specific_product_type,
+    product_with_default_variant,
+):
+    checkout = checkout_with_item
+    voucher = voucher_specific_product_type
+    line = checkout.lines.first()
+    product = line.variant.product
+    product2 = product_with_default_variant
+
+    add_variant_to_checkout(checkout, product2.variants.get(), 1)
+    product.collections.add(collection)
+    voucher.collections.add(collection)
+
+    prices = utils.get_prices_of_discounted_specific_product(checkout, voucher)
+
+    excepted_value = [line.variant.get_price() for item in range(line.quantity)]
+
+    assert checkout.lines.count() > 1
+    assert prices == excepted_value
+
+
+def test_get_prices_of_discounted_specific_product_only_category(
+    checkout_with_item, voucher_specific_product_type, product_with_default_variant
+):
+    checkout = checkout_with_item
+    voucher = voucher_specific_product_type
+    line = checkout.lines.first()
+    product = line.variant.product
+    product2 = product_with_default_variant
+    category = product.category
+    category2 = Category.objects.create(name="Cat", slug="cat")
+
+    product2.category = category2
+    product2.save()
+    add_variant_to_checkout(checkout, product2.variants.get(), 1)
+    voucher.categories.add(category)
+
+    prices = utils.get_prices_of_discounted_specific_product(checkout, voucher)
+
+    excepted_value = [line.variant.get_price() for item in range(line.quantity)]
+
+    assert checkout.lines.count() > 1
+    assert prices == excepted_value
+
+
+def test_get_prices_of_discounted_specific_product_all_products(
+    checkout_with_item, voucher_specific_product_type
+):
+    checkout = checkout_with_item
+    voucher = voucher_specific_product_type
+    line = checkout.lines.first()
+
+    prices = utils.get_prices_of_discounted_specific_product(checkout, voucher)
+
+    excepted_value = [line.variant.get_price() for item in range(line.quantity)]
+
+    assert prices == excepted_value
+
+
 def test_contains_unavailable_variants():
     missing_variant = Mock(check_quantity=Mock(side_effect=InsufficientStock("")))
     checkout = MagicMock()
@@ -563,11 +667,10 @@ def test_checkout_summary_page_empty_checkout(client, request_checkout):
 
 
 def test_checkout_line_total_with_discount_and_taxes(
-    sale, request_checkout_with_item, taxes
+    discount_info, request_checkout_with_item, taxes
 ):
-    sales = Sale.objects.all()
     line = request_checkout_with_item.lines.first()
-    assert line.get_total(discounts=sales, taxes=taxes) == TaxedMoney(
+    assert line.get_total(discounts=[discount_info], taxes=taxes) == TaxedMoney(
         net=Money("4.07", "USD"), gross=Money("5.00", "USD")
     )
 
@@ -646,6 +749,28 @@ def test_update_view_must_be_ajax(customer_user, rf):
     assert result.status_code == 302
 
 
+def test_update_checkout_line_qunatity_zero(
+    request_checkout_with_item, client, product
+):
+    variant = product.variants.filter().first()
+    data = {"quantity": 0}
+    # response = client.post(API_PATH, data, content_type="application/json")
+    response = client.post(
+        reverse("checkout:update-line", kwargs={"variant_id": variant.id}),
+        data=data,
+        HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+    )
+    assert response.status_code == 200
+    expected_response = {
+        "variantId": str(variant.id),
+        "subtotal": "$0.00",
+        "total": "$0.00",
+        "checkout": {"numItems": 0, "numLines": 0},
+    }
+    data = response.json()
+    assert data == expected_response
+
+
 def test_get_checkout_context(request_checkout_with_item, shipping_zone, vatlayer):
     checkout = request_checkout_with_item
     shipment_option = get_shipping_price_estimate(
@@ -677,8 +802,12 @@ def test_get_checkout_context_no_shipping(request_checkout_with_item, vatlayer):
     assert checkout_data["total_with_shipping"].start == checkout_total
 
 
-def test_checkout_total_with_discount(request_checkout_with_item, sale, vatlayer):
-    total = request_checkout_with_item.get_total(discounts=(sale,), taxes=vatlayer)
+def test_checkout_total_with_discount(
+    request_checkout_with_item, discount_info, vatlayer
+):
+    total = request_checkout_with_item.get_total(
+        discounts=[discount_info], taxes=vatlayer
+    )
     assert total == TaxedMoney(net=Money("4.07", "USD"), gross=Money("5.00", "USD"))
 
 

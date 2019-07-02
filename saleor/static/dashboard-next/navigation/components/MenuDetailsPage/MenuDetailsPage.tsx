@@ -1,13 +1,13 @@
 import Typography from "@material-ui/core/Typography";
-import * as React from "react";
+import React from "react";
 
-import AppHeader from "../../../components/AppHeader";
-import CardSpacer from "../../../components/CardSpacer";
-import { ConfirmButtonTransitionState } from "../../../components/ConfirmButton";
-import Container from "../../../components/Container";
-import Form from "../../../components/Form";
-import Grid from "../../../components/Grid";
-import SaveButtonBar from "../../../components/SaveButtonBar";
+import AppHeader from "@saleor/components/AppHeader";
+import CardSpacer from "@saleor/components/CardSpacer";
+import { ConfirmButtonTransitionState } from "@saleor/components/ConfirmButton";
+import Container from "@saleor/components/Container";
+import Form from "@saleor/components/Form";
+import Grid from "@saleor/components/Grid";
+import SaveButtonBar from "@saleor/components/SaveButtonBar";
 import i18n from "../../../i18n";
 import { maybe } from "../../../misc";
 import { MenuDetails_menu } from "../../types/MenuDetails";
@@ -79,7 +79,7 @@ const MenuDetailsPage: React.StatelessComponent<MenuDetailsPageProps> = ({
           <AppHeader onBack={onBack}>{i18n.t("Navigation")}</AppHeader>
           <Grid variant="inverted">
             <div>
-              <Typography variant="headline">{i18n.t("Navigation")}</Typography>
+              <Typography variant="h5">{i18n.t("Navigation")}</Typography>
               <Typography>
                 {i18n.t(
                   "Creating the navigation structure is done by dragging and dropping. Simply create a new menu item and then drag it into its destined place. You can move items inside one another to create a tree structure and drag items up and down to create a hierarchy"

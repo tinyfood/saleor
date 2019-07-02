@@ -1,9 +1,9 @@
 import Card from "@material-ui/core/Card";
 import CardContent from "@material-ui/core/CardContent";
 import { storiesOf } from "@storybook/react";
-import * as React from "react";
+import React from "react";
 
-import AddressEdit from "../../../components/AddressEdit";
+import AddressEdit from "@saleor/components/AddressEdit";
 import { customer } from "../../../customers/fixtures";
 import { transformAddressToForm } from "../../../misc";
 import { countries } from "../../../orders/fixtures";

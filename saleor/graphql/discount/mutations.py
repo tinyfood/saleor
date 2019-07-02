@@ -1,7 +1,11 @@
 import graphene
 
+from ...core.utils.promo_code import (
+    PromoCodeAlreadyExists,
+    generate_promo_code,
+    is_available_promo_code,
+)
 from ...discount import models
-from ...discount.utils import generate_voucher_code
 from ..core.mutations import BaseMutation, ModelDeleteMutation, ModelMutation
 from ..core.scalars import Decimal
 from ..product.types import Category, Collection, Product
@@ -62,14 +66,19 @@ class BaseDiscountCatalogueMutation(BaseMutation):
 
 class VoucherInput(graphene.InputObjectType):
     type = VoucherTypeEnum(
-        description="Voucher type: product, category shipping or value."
+        description=(
+            "Voucher type: PRODUCT, CATEGORY SHIPPING or ENTIRE_ORDER. "
+            "Deprecated fields: "
+            "PRODUCT, COLLECTION, CATEGORY use SPECIFIC_PRODUCT instead. "
+            "VALUE use ENTIRE_ORDER instead."
+        )
     )
     name = graphene.String(description="Voucher name.")
     code = graphene.String(decription="Code to use the voucher.")
-    start_date = graphene.types.datetime.Date(
+    start_date = graphene.types.datetime.DateTime(
         description="Start date of the voucher in ISO 8601 format."
     )
-    end_date = graphene.types.datetime.Date(
+    end_date = graphene.types.datetime.DateTime(
         description="End date of the voucher in ISO 8601 format."
     )
     discount_value_type = DiscountValueTypeEnum(
@@ -96,6 +105,9 @@ class VoucherInput(graphene.InputObjectType):
         graphene.String,
         description="Country codes that can be used with the shipping voucher",
     )
+    apply_once_per_order = graphene.Boolean(
+        description="Voucher should be applied to the cheapest item or entire order"
+    )
 
 
 class VoucherCreate(ModelMutation):
@@ -113,7 +125,12 @@ class VoucherCreate(ModelMutation):
     def clean_input(cls, info, instance, data):
         code = data.get("code", None)
         if code == "":
-            data["code"] = generate_voucher_code()
+            data["code"] = generate_promo_code()
+        elif not is_available_promo_code(code):
+            raise PromoCodeAlreadyExists()
+        voucher_type = data.get("type", None)
+        if voucher_type == VoucherTypeEnum.VALUE:
+            data["type"] = VoucherTypeEnum.ENTIRE_ORDER.value
         cleaned_input = super().clean_input(info, instance, data)
         return cleaned_input
 
@@ -202,8 +219,12 @@ class SaleInput(graphene.InputObjectType):
         description="Collections related to the discount.",
         name="collections",
     )
-    start_date = graphene.Date(description="Start date of the sale in ISO 8601 format.")
-    end_date = graphene.Date(description="End date of the sale in ISO 8601 format.")
+    start_date = graphene.types.datetime.DateTime(
+        description="Start date of the voucher in ISO 8601 format."
+    )
+    end_date = graphene.types.datetime.DateTime(
+        description="End date of the voucher in ISO 8601 format."
+    )
 
 
 class SaleCreate(ModelMutation):

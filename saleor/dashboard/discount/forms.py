@@ -6,10 +6,10 @@ from django_countries import countries
 from django_prices.forms import MoneyField
 from mptt.forms import TreeNodeMultipleChoiceField
 
+from ...core.utils.promo_code import generate_promo_code
 from ...core.utils.taxes import ZERO_MONEY
 from ...discount import DiscountValueType
 from ...discount.models import Sale, Voucher
-from ...discount.utils import generate_voucher_code
 from ...product.models import Category, Product
 from ..forms import AjaxSelect2MultipleChoiceField
 
@@ -107,7 +107,7 @@ class VoucherForm(forms.ModelForm):
         initial = kwargs.get("initial", {})
         instance = kwargs.get("instance")
         if instance and instance.id is None and not initial.get("code"):
-            initial["code"] = generate_voucher_code()
+            initial["code"] = generate_promo_code()
         kwargs["initial"] = initial
         super().__init__(*args, **kwargs)
 
@@ -128,7 +128,7 @@ class ShippingVoucherForm(forms.ModelForm):
         fields = ["countries", "min_amount_spent"]
 
 
-class ValueVoucherForm(forms.ModelForm):
+class EntireOrderVoucherForm(forms.ModelForm):
     min_amount_spent = MinAmountSpent
 
     class Meta:
@@ -157,6 +157,46 @@ class CommonVoucherForm(forms.ModelForm):
             "off each suitable item in an order.",
         ),
     )
+
+
+class SpecificProductVoucherForm(CommonVoucherForm):
+    products = AjaxSelect2MultipleChoiceField(
+        queryset=Product.objects.all(),
+        fetch_data_url=reverse_lazy("dashboard:ajax-products"),
+        required=True,
+        label=pgettext_lazy(
+            "Products that can be discounted with the voucher", "Products"
+        ),
+    )
+    categories = TreeNodeMultipleChoiceField(
+        queryset=Category.objects.all(),
+        required=True,
+        label=pgettext_lazy(
+            "Categories that can be discounted with the voucher", "Categories"
+        ),
+    )
+
+    class Meta:
+        model = Voucher
+        fields = [
+            "products",
+            "collections",
+            "categories",
+            "apply_once_per_order",
+            "min_amount_spent",
+        ]
+        labels = {
+            "collections": pgettext_lazy(
+                "Collections that can be discounted with the voucher", "Collections"
+            )
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            self.fields["products"].set_initial(self.instance.products.all())
+        self.fields["categories"].required = False
+        self.fields["products"].required = False
 
 
 class ProductVoucherForm(CommonVoucherForm):

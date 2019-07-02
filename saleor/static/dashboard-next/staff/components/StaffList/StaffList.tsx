@@ -12,11 +12,11 @@ import TableFooter from "@material-ui/core/TableFooter";
 import TableHead from "@material-ui/core/TableHead";
 import TableRow from "@material-ui/core/TableRow";
 import Typography from "@material-ui/core/Typography";
-import * as classNames from "classnames";
-import * as React from "react";
+import classNames from "classnames";
+import React from "react";
 
-import Skeleton from "../../../components/Skeleton";
-import TablePagination from "../../../components/TablePagination";
+import Skeleton from "@saleor/components/Skeleton";
+import TablePagination from "@saleor/components/TablePagination";
 import i18n from "../../../i18n";
 import {
   getUserInitials,

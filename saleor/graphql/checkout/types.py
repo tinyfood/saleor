@@ -6,6 +6,7 @@ from ...checkout import models
 from ...core.utils.taxes import get_taxes_for_address
 from ..core.connection import CountableDjangoObjectType
 from ..core.types.money import TaxedMoney
+from ..giftcard.types import GiftCard
 from ..order.utils import applicable_shipping_methods
 from ..payment.enums import PaymentGatewayEnum
 from ..shipping.types import ShippingMethod
@@ -49,6 +50,12 @@ class Checkout(CountableDjangoObjectType):
         required=True,
     )
     email = graphene.String(description="Email of a customer", required=True)
+    gift_cards = gql_optimizer.field(
+        graphene.List(
+            GiftCard, description="List of gift cards associated with this checkout"
+        ),
+        model_field="gift_cards",
+    )
     is_shipping_required = graphene.Boolean(
         description="Returns True, if checkout requires shipping.", required=True
     )
@@ -84,6 +91,7 @@ class Checkout(CountableDjangoObjectType):
             "created",
             "discount_amount",
             "discount_name",
+            "gift_cards",
             "is_shipping_required",
             "last_change",
             "note",
@@ -106,9 +114,9 @@ class Checkout(CountableDjangoObjectType):
         return root.get_total(discounts=info.context.discounts, taxes=taxes)
 
     @staticmethod
-    def resolve_subtotal_price(root: models.Checkout, *_args):
+    def resolve_subtotal_price(root: models.Checkout, info):
         taxes = get_taxes_for_address(root.shipping_address)
-        return root.get_subtotal(taxes=taxes)
+        return root.get_subtotal(discounts=info.context.discounts, taxes=taxes)
 
     @staticmethod
     def resolve_shipping_price(root: models.Checkout, *_args):
@@ -128,6 +136,10 @@ class Checkout(CountableDjangoObjectType):
     @staticmethod
     def resolve_available_payment_gateways(_: models.Checkout, _info):
         return settings.CHECKOUT_PAYMENT_GATEWAYS.keys()
+
+    @staticmethod
+    def resolve_gift_cards(root: models.Checkout, _info):
+        return root.gift_cards.all()
 
     @staticmethod
     def resolve_is_shipping_required(root: models.Checkout, _info):

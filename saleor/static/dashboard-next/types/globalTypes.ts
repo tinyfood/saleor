@@ -143,6 +143,7 @@ export enum PaymentChargeStatusEnum {
 export enum PermissionEnum {
   IMPERSONATE_USERS = "IMPERSONATE_USERS",
   MANAGE_DISCOUNTS = "MANAGE_DISCOUNTS",
+  MANAGE_GIFT_CARD = "MANAGE_GIFT_CARD",
   MANAGE_MENUS = "MANAGE_MENUS",
   MANAGE_ORDERS = "MANAGE_ORDERS",
   MANAGE_PAGES = "MANAGE_PAGES",
@@ -205,17 +206,19 @@ export enum VoucherDiscountValueType {
 export enum VoucherType {
   CATEGORY = "CATEGORY",
   COLLECTION = "COLLECTION",
+  ENTIRE_ORDER = "ENTIRE_ORDER",
   PRODUCT = "PRODUCT",
   SHIPPING = "SHIPPING",
-  VALUE = "VALUE",
+  SPECIFIC_PRODUCT = "SPECIFIC_PRODUCT",
 }
 
 export enum VoucherTypeEnum {
   CATEGORY = "CATEGORY",
   COLLECTION = "COLLECTION",
+  ENTIRE_ORDER = "ENTIRE_ORDER",
   PRODUCT = "PRODUCT",
   SHIPPING = "SHIPPING",
-  VALUE = "VALUE",
+  SPECIFIC_PRODUCT = "SPECIFIC_PRODUCT",
 }
 
 export enum WeightUnitsEnum {
@@ -242,6 +245,11 @@ export interface AddressInput {
 export interface AttributeCreateInput {
   name: string;
   values?: (AttributeValueCreateInput | null)[] | null;
+}
+
+export interface AttributeInput {
+  slug: string;
+  value: string;
 }
 
 export interface AttributeUpdateInput {
@@ -316,6 +324,11 @@ export interface CustomerInput {
   note?: string | null;
 }
 
+export interface DateRangeInput {
+  gte?: any | null;
+  lte?: any | null;
+}
+
 export interface DraftOrderInput {
   billingAddress?: AddressInput | null;
   user?: string | null;
@@ -383,6 +396,13 @@ export interface OrderAddNoteInput {
   message?: string | null;
 }
 
+export interface OrderFilterInput {
+  paymentStatus?: (PaymentChargeStatusEnum | null)[] | null;
+  status?: (OrderStatusFilter | null)[] | null;
+  customer?: string | null;
+  created?: DateRangeInput | null;
+}
+
 export interface OrderLineCreateInput {
   quantity: number;
   variantId: string;
@@ -418,6 +438,22 @@ export interface PageTranslationInput {
   title?: string | null;
   content?: string | null;
   contentJson?: any | null;
+}
+
+export interface PriceRangeInput {
+  gte?: number | null;
+  lte?: number | null;
+}
+
+export interface ProductFilterInput {
+  isPublished?: boolean | null;
+  collections?: (string | null)[] | null;
+  categories?: (string | null)[] | null;
+  price?: PriceRangeInput | null;
+  attributes?: (AttributeInput | null)[] | null;
+  stockAvailability?: StockAvailability | null;
+  productType?: string | null;
+  search?: string | null;
 }
 
 export interface ProductTypeInput {
@@ -543,6 +579,7 @@ export interface VoucherInput {
   categories?: (string | null)[] | null;
   minAmountSpent?: any | null;
   countries?: (string | null)[] | null;
+  applyOncePerOrder?: boolean | null;
 }
 
 //==============================================================

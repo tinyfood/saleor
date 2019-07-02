@@ -1,14 +1,15 @@
-import * as React from "react";
+import React from "react";
 
-import { WindowTitle } from "../../components/WindowTitle";
-import useNavigator from "../../hooks/useNavigator";
-import useNotifier from "../../hooks/useNotifier";
-import useShop from "../../hooks/useShop";
+import { WindowTitle } from "@saleor/components/WindowTitle";
+import useNavigator from "@saleor/hooks/useNavigator";
+import useNotifier from "@saleor/hooks/useNotifier";
+import useShop from "@saleor/hooks/useShop";
+import { DEFAULT_INITIAL_SEARCH_DATA } from "../../config";
+import SearchCategories from "../../containers/SearchCategories";
+import SearchCollections from "../../containers/SearchCollections";
 import i18n from "../../i18n";
 import { decimal, getMutationState, maybe } from "../../misc";
 import ProductCreatePage, { FormData } from "../components/ProductCreatePage";
-import { CategorySearchProvider } from "../containers/CategorySearch";
-import { CollectionSearchProvider } from "../containers/CollectionSearch";
 import { TypedProductCreateMutation } from "../mutations";
 import { TypedProductCreateQuery } from "../queries";
 import { ProductCreate } from "../types/ProductCreate";
@@ -29,10 +30,10 @@ export const ProductUpdate: React.StatelessComponent<
   const handleBack = () => navigate(productListUrl());
 
   return (
-    <CategorySearchProvider>
-      {({ search: searchCategory, searchOpts: searchCategoryOpts }) => (
-        <CollectionSearchProvider>
-          {({ search: searchCollection, searchOpts: searchCollectionOpts }) => (
+    <SearchCategories variables={DEFAULT_INITIAL_SEARCH_DATA}>
+      {({ search: searchCategory, result: searchCategoryOpts }) => (
+        <SearchCollections variables={DEFAULT_INITIAL_SEARCH_DATA}>
+          {({ search: searchCollection, result: searchCollectionOpts }) => (
             <TypedProductCreateQuery displayLoader>
               {({ data, loading }) => {
                 const handleSuccess = (data: ProductCreate) => {
@@ -67,13 +68,17 @@ export const ProductUpdate: React.StatelessComponent<
                             descriptionJson: JSON.stringify(
                               formData.description
                             ),
-                            isPublished: formData.available,
+                            isPublished: formData.isPublished,
                             name: formData.name,
                             productType: formData.productType.value.id,
                             publicationDate:
                               formData.publicationDate !== ""
                                 ? formData.publicationDate
                                 : null,
+                            seo: {
+                              description: formData.seoDescription,
+                              title: formData.seoTitle,
+                            },
                             sku: formData.sku,
                             stockQuantity:
                               formData.stockQuantity !== null
@@ -127,9 +132,9 @@ export const ProductUpdate: React.StatelessComponent<
               }}
             </TypedProductCreateQuery>
           )}
-        </CollectionSearchProvider>
+        </SearchCollections>
       )}
-    </CategorySearchProvider>
+    </SearchCategories>
   );
 };
 export default ProductUpdate;

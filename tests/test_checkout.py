@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 import pytest
 from django.contrib.auth.models import AnonymousUser
 from django.urls import reverse
+from django.utils import timezone
 from django_countries.fields import Country
 from freezegun import freeze_time
 from prices import Money, TaxedMoney, TaxedMoneyRange
@@ -25,6 +26,7 @@ from saleor.checkout.utils import (
     get_voucher_discount_for_checkout,
     get_voucher_for_checkout,
     is_valid_shipping_method,
+    prepare_order_data,
     recalculate_checkout_discount,
     remove_voucher_from_checkout,
 )
@@ -261,6 +263,50 @@ def test_view_checkout_shipping_method_without_address(
 
 
 @patch("saleor.checkout.utils.send_order_confirmation")
+def test_view_checkout_summary_finalize_with_voucher(
+    mock_send_confirmation,
+    client,
+    shipping_zone,
+    address,
+    request_checkout_with_item,
+    voucher,
+):
+    checkout = request_checkout_with_item
+    expected_voucher_usage_count = voucher.used + 1
+
+    checkout.shipping_address = address
+    checkout.voucher_code = voucher.code
+    checkout.email = "test@example.com"
+    checkout.shipping_method = shipping_zone.shipping_methods.first()
+    checkout.save()
+
+    url = reverse("checkout:summary")
+    data = {"address": "shipping_address"}
+
+    response = client.get(url)
+    assert response.status_code == 200
+    assert response.request["PATH_INFO"] == url
+
+    response = client.post(url, data, follow=True)
+    assert response.status_code == 200
+
+    order = response.context["order"]
+    assert order.user_email == "test@example.com"
+    redirect_url = reverse("order:payment", kwargs={"token": order.token})
+    assert response.request["PATH_INFO"] == redirect_url
+
+    # we expect the user to be anonymous, thus None
+    mock_send_confirmation.delay.assert_called_once_with(order.pk, None)
+
+    # checkout should be deleted after order is created
+    assert checkout.pk is None
+
+    # Ensure the voucher was updated
+    voucher.refresh_from_db(fields=["used"])
+    assert voucher.used == expected_voucher_usage_count
+
+
+@patch("saleor.checkout.utils.send_order_confirmation")
 def test_view_checkout_summary_anonymous_user(
     mock_send_confirmation, client, shipping_zone, address, request_checkout_with_item
 ):
@@ -452,7 +498,7 @@ def test_view_checkout_place_order_with_expired_voucher_code(
     checkout.shipping_method = shipping_zone.shipping_methods.first()
 
     # set voucher to be expired
-    yesterday = datetime.date.today() - datetime.timedelta(days=1)
+    yesterday = timezone.now() - datetime.timedelta(days=1)
     voucher.end_date = yesterday
     voucher.save()
 
@@ -575,10 +621,10 @@ def test_create_order_creates_expected_events(
 
     # Place checkout
     order = create_order(
-        checkout,
-        "tracking_code",
-        discounts=None,
-        taxes=None,
+        checkout=checkout,
+        order_data=prepare_order_data(
+            checkout=checkout, tracking_code="tracking_code", discounts=None, taxes=None
+        ),
         user=customer_user if not is_anonymous_user else AnonymousUser(),
     )
 
@@ -627,12 +673,11 @@ def test_create_order_insufficient_stock(
     request_checkout.save()
 
     with pytest.raises(InsufficientStock):
-        create_order(
-            request_checkout,
-            "tracking_code",
+        prepare_order_data(
+            checkout=request_checkout,
+            tracking_code="tracking_code",
             discounts=None,
             taxes=None,
-            user=customer_user,
         )
 
 
@@ -646,18 +691,121 @@ def test_create_order_doesnt_duplicate_order(
     checkout.shipping_method = shipping_method
     checkout.save()
 
-    with patch.object(checkout, "delete") as mocked_delete:
-        order_1 = create_order(
-            checkout, tracking_code="", discounts=None, taxes=None, user=customer_user
-        )
-        assert order_1.checkout_token == checkout.token
+    order_data = prepare_order_data(
+        checkout=checkout, tracking_code="", discounts=None, taxes=None
+    )
 
-        order_2 = create_order(
-            checkout, tracking_code="", discounts=None, taxes=None, user=customer_user
-        )
-        assert order_1.pk == order_2.pk
+    order_1 = create_order(checkout=checkout, order_data=order_data, user=customer_user)
+    assert order_1.checkout_token == checkout.token
 
-        assert mocked_delete.call_count == 1
+    order_2 = create_order(checkout=checkout, order_data=order_data, user=customer_user)
+    assert order_1.pk == order_2.pk
+
+
+@pytest.mark.parametrize("is_anonymous_user", (True, False))
+def test_create_order_with_gift_card(
+    checkout_with_gift_card, customer_user, shipping_method, is_anonymous_user
+):
+    checkout_user = None if is_anonymous_user else customer_user
+    checkout = checkout_with_gift_card
+    checkout.user = checkout_user
+    checkout.billing_address = customer_user.default_billing_address
+    checkout.shipping_address = customer_user.default_billing_address
+    checkout.shipping_method = shipping_method
+    checkout.save()
+
+    total_gross_without_gift_cards = (
+        checkout.get_subtotal()
+        + checkout.get_shipping_price(None)
+        - checkout.discount_amount
+    ).gross
+    gift_cards_balance = checkout.get_total_gift_cards_balance()
+
+    order = create_order(
+        checkout=checkout,
+        order_data=prepare_order_data(
+            checkout=checkout, tracking_code="tracking_code", discounts=None, taxes=None
+        ),
+        user=customer_user if not is_anonymous_user else AnonymousUser(),
+    )
+
+    assert order.gift_cards.count() > 0
+    assert order.gift_cards.first().current_balance.amount == 0
+    assert order.total.gross == (total_gross_without_gift_cards - gift_cards_balance)
+
+
+def test_create_order_with_gift_card_partial_use(
+    checkout_with_item, gift_card_used, customer_user, shipping_method
+):
+    checkout = checkout_with_item
+    checkout.user = customer_user
+    checkout.billing_address = customer_user.default_billing_address
+    checkout.shipping_address = customer_user.default_billing_address
+    checkout.shipping_method = shipping_method
+    checkout.save()
+
+    price_without_gift_card = checkout.get_total()
+    gift_card_balance_before_order = gift_card_used.current_balance
+
+    checkout.gift_cards.add(gift_card_used)
+    checkout.save()
+
+    order = create_order(
+        checkout=checkout,
+        order_data=prepare_order_data(
+            checkout=checkout, tracking_code="tracking_code", discounts=None, taxes=None
+        ),
+        user=customer_user,
+    )
+
+    gift_card_used.refresh_from_db()
+    assert order.gift_cards.count() > 0
+    assert order.total == ZERO_TAXED_MONEY
+    assert (
+        gift_card_balance_before_order
+        == (price_without_gift_card + gift_card_used.current_balance).gross.amount
+    )
+
+
+def test_create_order_with_many_gift_cards(
+    checkout_with_item,
+    gift_card_created_by_staff,
+    gift_card,
+    customer_user,
+    shipping_method,
+):
+    checkout = checkout_with_item
+    checkout.user = customer_user
+    checkout.billing_address = customer_user.default_billing_address
+    checkout.shipping_address = customer_user.default_billing_address
+    checkout.shipping_method = shipping_method
+    checkout.save()
+
+    price_without_gift_card = checkout.get_total()
+    gift_cards_balance_befor_order = (
+        gift_card_created_by_staff.current_balance + gift_card.current_balance
+    )
+
+    checkout.gift_cards.add(gift_card_created_by_staff)
+    checkout.gift_cards.add(gift_card)
+    checkout.save()
+
+    order = create_order(
+        checkout=checkout,
+        order_data=prepare_order_data(
+            checkout=checkout, tracking_code="tracking_code", discounts=None, taxes=None
+        ),
+        user=customer_user,
+    )
+
+    gift_card_created_by_staff.refresh_from_db()
+    gift_card.refresh_from_db()
+    assert order.gift_cards.count() > 0
+    assert gift_card_created_by_staff.current_balance == ZERO_MONEY
+    assert gift_card.current_balance == ZERO_MONEY
+    assert price_without_gift_card.gross.amount == (
+        gift_cards_balance_befor_order + order.total.gross.amount
+    )
 
 
 def test_note_in_created_order(request_checkout_with_item, address, customer_user):
@@ -665,10 +813,13 @@ def test_note_in_created_order(request_checkout_with_item, address, customer_use
     request_checkout_with_item.note = "test_note"
     request_checkout_with_item.save()
     order = create_order(
-        request_checkout_with_item,
-        "tracking_code",
-        discounts=None,
-        taxes=None,
+        checkout=request_checkout_with_item,
+        order_data=prepare_order_data(
+            checkout=request_checkout_with_item,
+            tracking_code="tracking_code",
+            discounts=None,
+            taxes=None,
+        ),
         user=customer_user,
     )
     assert order.customer_note == request_checkout_with_item.note
@@ -686,7 +837,7 @@ def test_get_discount_for_checkout_value_voucher(
 ):
     voucher = Voucher(
         code="unique",
-        type=VoucherType.VALUE,
+        type=VoucherType.ENTIRE_ORDER,
         discount_value_type=discount_type,
         discount_value=discount_value,
         min_amount_spent=(
@@ -699,10 +850,41 @@ def test_get_discount_for_checkout_value_voucher(
     assert discount == Money(discount_amount, "USD")
 
 
+@pytest.mark.parametrize(
+    "discount_value, discount_type, apply_once_per_order, discount_amount",
+    [
+        (5, DiscountValueType.FIXED, True, 5),
+        (5, DiscountValueType.FIXED, False, 15),
+        (10000, DiscountValueType.FIXED, True, 10),
+        (10, DiscountValueType.PERCENTAGE, True, 1),
+        (10, DiscountValueType.PERCENTAGE, False, 5),
+    ],
+)
+def test_get_discount_for_checkout_apply_once_per_order(
+    checkout_with_items,
+    product_list,
+    discount_value,
+    discount_type,
+    apply_once_per_order,
+    discount_amount,
+):
+    voucher = Voucher.objects.create(
+        code="unique",
+        type=VoucherType.PRODUCT,
+        discount_value_type=discount_type,
+        discount_value=discount_value,
+        apply_once_per_order=apply_once_per_order,
+    )
+    for product in product_list:
+        voucher.products.add(product)
+    discount = get_voucher_discount_for_checkout(voucher, checkout_with_items)
+    assert discount == Money(discount_amount, "USD")
+
+
 def test_get_discount_for_checkout_value_voucher_not_applicable():
     voucher = Voucher(
         code="unique",
-        type=VoucherType.VALUE,
+        type=VoucherType.ENTIRE_ORDER,
         discount_value_type=DiscountValueType.FIXED,
         discount_value=10,
         min_amount_spent=Money(100, "USD"),
@@ -937,7 +1119,7 @@ def test_checkout_voucher_form_active_queryset_voucher_not_active(
     voucher, request_checkout_with_item
 ):
     assert Voucher.objects.count() == 1
-    voucher.start_date = datetime.date.today() + datetime.timedelta(days=1)
+    voucher.start_date = timezone.now() + datetime.timedelta(days=1)
     voucher.save()
     form = CheckoutVoucherForm(
         {"voucher": voucher.code}, instance=request_checkout_with_item
@@ -950,7 +1132,7 @@ def test_checkout_voucher_form_active_queryset_voucher_active(
     voucher, request_checkout_with_item
 ):
     assert Voucher.objects.count() == 1
-    voucher.start_date = datetime.date.today()
+    voucher.start_date = timezone.now()
     voucher.save()
     form = CheckoutVoucherForm(
         {"voucher": voucher.code}, instance=request_checkout_with_item
@@ -963,8 +1145,8 @@ def test_checkout_voucher_form_active_queryset_after_some_time(
     voucher, request_checkout_with_item
 ):
     assert Voucher.objects.count() == 1
-    voucher.start_date = datetime.date(year=2016, month=6, day=1)
-    voucher.end_date = datetime.date(year=2016, month=6, day=2)
+    voucher.start_date = timezone.now().replace(year=2016, month=6, day=1, hour=0)
+    voucher.end_date = timezone.now().replace(year=2016, month=6, day=2, hour=0)
     voucher.save()
 
     with freeze_time("2016-05-31"):
@@ -973,7 +1155,7 @@ def test_checkout_voucher_form_active_queryset_after_some_time(
         )
         assert form.fields["voucher"].queryset.count() == 0
 
-    with freeze_time("2016-06-01"):
+    with freeze_time("2016-06-01T05:00:00+00:00"):
         form = CheckoutVoucherForm(
             {"voucher": voucher.code}, instance=request_checkout_with_item
         )
@@ -1017,7 +1199,7 @@ def test_get_voucher_for_checkout(checkout_with_voucher, voucher):
 
 
 def test_get_voucher_for_checkout_expired_voucher(checkout_with_voucher, voucher):
-    date_yesterday = datetime.date.today() - datetime.timedelta(days=1)
+    date_yesterday = timezone.now() - datetime.timedelta(days=1)
     voucher.end_date = date_yesterday
     voucher.save()
     checkout_voucher = get_voucher_for_checkout(checkout_with_voucher)
@@ -1053,6 +1235,16 @@ def test_recalculate_checkout_discount(
     assert checkout_with_voucher.discount_amount == Money("10.00", "USD")
 
 
+def test_recalculate_checkout_discount_with_sale(
+    checkout_with_voucher_percentage, discount_info
+):
+    checkout = checkout_with_voucher_percentage
+    recalculate_checkout_discount(checkout, [discount_info], None)
+    assert checkout.discount_amount == Money("1.50", "USD")
+    total = TaxedMoney(net=Money("13.50", "USD"), gross=Money("13.50", "USD"))
+    assert checkout.get_total(discounts=[discount_info]) == total
+
+
 def test_recalculate_checkout_discount_voucher_not_applicable(
     checkout_with_voucher, voucher
 ):
@@ -1069,7 +1261,7 @@ def test_recalculate_checkout_discount_voucher_not_applicable(
 
 def test_recalculate_checkout_discount_expired_voucher(checkout_with_voucher, voucher):
     checkout = checkout_with_voucher
-    date_yesterday = datetime.date.today() - datetime.timedelta(days=1)
+    date_yesterday = timezone.now() - datetime.timedelta(days=1)
     voucher.end_date = date_yesterday
     voucher.save()
 
@@ -1188,7 +1380,7 @@ def test_get_prices_of_products_in_discounted_categories(checkout_with_item):
 
 def test_add_voucher_to_checkout(checkout_with_item, voucher):
     assert checkout_with_item.voucher_code is None
-    add_voucher_to_checkout(voucher, checkout_with_item)
+    add_voucher_to_checkout(checkout_with_item, voucher)
 
     assert checkout_with_item.voucher_code == voucher.code
 
@@ -1197,6 +1389,6 @@ def test_add_voucher_to_checkout_fail(
     checkout_with_item, voucher_with_high_min_amount_spent
 ):
     with pytest.raises(NotApplicable):
-        add_voucher_to_checkout(voucher_with_high_min_amount_spent, checkout_with_item)
+        add_voucher_to_checkout(checkout_with_item, voucher_with_high_min_amount_spent)
 
     assert checkout_with_item.voucher_code is None

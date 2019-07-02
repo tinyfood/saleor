@@ -8,7 +8,7 @@ from prices import Money, TaxedMoney
 
 from saleor.account import events as account_events
 from saleor.account.models import User
-from saleor.checkout.utils import create_order
+from saleor.checkout.utils import create_order, prepare_order_data
 from saleor.core.exceptions import InsufficientStock
 from saleor.core.utils.taxes import (
     DEFAULT_TAX_RATE_NAME,
@@ -459,10 +459,13 @@ def test_order_payment_flow(
     request_checkout_with_item.save()
 
     order = create_order(
-        request_checkout_with_item,
-        "tracking_code",
-        discounts=None,
-        taxes=None,
+        checkout=request_checkout_with_item,
+        order_data=prepare_order_data(
+            checkout=request_checkout_with_item,
+            tracking_code="tracking_code",
+            discounts=None,
+            taxes=None,
+        ),
         user=customer_user,
     )
 
@@ -548,6 +551,50 @@ def test_add_order_note_view(order, authorized_client, customer_user):
     assert note_event.user == customer_user
     assert note_event.order == order
     assert note_event.parameters == {"message": customer_note}
+
+
+def test_add_order_note_view_anonymous_order(order, authorized_client, customer_user):
+    order.user_email = customer_user.email
+    order.user = None
+    order.save(update_fields=["user_email", "user"])
+    url = reverse("order:details", kwargs={"token": order.token})
+    customer_note = "bla-bla note"
+    data = {"customer_note": customer_note}
+
+    response = authorized_client.post(url, data)
+    assert response.status_code == 302
+
+    # Ensure an order event was triggered
+    note_event = order_events.OrderEvent.objects.last()  # type: order_events.OrderEvent
+    assert note_event.type == order_events.OrderEvents.NOTE_ADDED
+    assert note_event.user == customer_user
+    assert note_event.order == order
+    assert note_event.parameters == {"message": customer_note}
+
+    # Ensure a customer event was not triggered because the order has no user
+    assert not account_events.CustomerEvent.objects.exists()
+
+
+def test_anonymously_add_order_note_view_anonymous_order(order, client, customer_user):
+    order.user_email = customer_user.email
+    order.user = None
+    order.save(update_fields=["user_email", "user"])
+    url = reverse("order:details", kwargs={"token": order.token})
+    customer_note = "bla-bla note"
+    data = {"customer_note": customer_note}
+
+    response = client.post(url, data)
+    assert response.status_code == 302
+
+    # Ensure an order event was triggered
+    note_event = order_events.OrderEvent.objects.last()  # type: order_events.OrderEvent
+    assert note_event.type == order_events.OrderEvents.NOTE_ADDED
+    assert note_event.user is None
+    assert note_event.order == order
+    assert note_event.parameters == {"message": customer_note}
+
+    # Ensure a customer event was not triggered because the order has no user
+    assert not account_events.CustomerEvent.objects.exists()
 
 
 def _calculate_order_weight_from_lines(order):

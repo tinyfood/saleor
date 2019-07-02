@@ -8,6 +8,7 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
+from django.utils import timezone
 from django.utils.encoding import smart_text
 from django.utils.translation import get_language, pgettext, pgettext_lazy
 from prices import TaxedMoneyRange
@@ -17,18 +18,29 @@ from ..account.models import Address, User
 from ..account.utils import store_user_address
 from ..core.exceptions import InsufficientStock
 from ..core.utils import to_local_currency
-from ..core.utils.taxes import ZERO_MONEY, get_taxes_for_country
+from ..core.utils.promo_code import (
+    InvalidPromoCode,
+    promo_code_is_gift_card,
+    promo_code_is_voucher,
+)
+from ..core.utils.taxes import ZERO_MONEY, get_tax_rate_by_name, get_taxes_for_country
 from ..discount import VoucherType
 from ..discount.models import NotApplicable, Voucher
 from ..discount.utils import (
+    decrease_voucher_usage,
     get_products_voucher_discount,
     get_shipping_voucher_discount,
     get_value_voucher_discount,
     increase_voucher_usage,
 )
+from ..giftcard.utils import (
+    add_gift_card_code_to_checkout,
+    remove_gift_card_code_from_checkout,
+)
 from ..order import events
 from ..order.emails import send_order_confirmation
-from ..order.models import Order
+from ..order.models import Order, OrderLine
+from ..product.models import ProductVariant
 from ..shipping.models import ShippingMethod
 from . import AddressType, logger
 from .forms import (
@@ -85,6 +97,34 @@ def remove_unavailable_variants(checkout):
 def get_variant_prices_from_lines(lines):
     """Get's price of each individual item within the lines."""
     return [line.variant.get_price() for line in lines for item in range(line.quantity)]
+
+
+def get_prices_of_discounted_specific_product(lines, voucher):
+    """Get prices of variants belonging to the discounted specific products.
+
+    Specific products are products, collections and categories.
+    Product must be assigned directly to the discounted category, assigning
+    product to child category won't work.
+    """
+    # If there's no discounted products, collections or categories,
+    # it means that all products are discounted
+    discounted_products = voucher.products.all()
+    discounted_categories = set(voucher.categories.all())
+    discounted_collections = set(voucher.collections.all())
+    if discounted_products or discounted_collections or discounted_categories:
+        discounted_lines = []
+        for line in lines:
+            line_product = line.variant.product
+            line_category = line.variant.product.category
+            line_collections = set(line.variant.product.collections.all())
+            if line.variant and (
+                line_product in discounted_products
+                or line_category in discounted_categories
+                or line_collections.intersection(discounted_collections)
+            ):
+                discounted_lines.append(line)
+        return get_variant_prices_from_lines(discounted_lines)
+    return get_variant_prices_from_lines(lines)
 
 
 def get_prices_of_discounted_products(lines, discounted_products):
@@ -669,7 +709,9 @@ def get_checkout_context(
     return context
 
 
-def _get_shipping_voucher_discount_for_checkout(voucher, checkout):
+def _get_shipping_voucher_discount_for_checkout(
+    voucher, checkout, discounts=None, taxes=None
+):
     """Calculate discount value for a voucher of shipping type."""
     if not checkout.is_shipping_required():
         msg = pgettext(
@@ -692,14 +734,19 @@ def _get_shipping_voucher_discount_for_checkout(voucher, checkout):
         raise NotApplicable(msg)
 
     return get_shipping_voucher_discount(
-        voucher, checkout.get_subtotal(), shipping_method.get_total()
+        voucher,
+        checkout.get_subtotal(discounts, taxes),
+        shipping_method.get_total(taxes),
     )
 
 
 def _get_products_voucher_discount(order_or_checkout, voucher):
-    """Calculate products discount value for a voucher, depending on its type.
-    """
-    if voucher.type == VoucherType.PRODUCT:
+    """Calculate products discount value for a voucher, depending on its type."""
+    if voucher.type == VoucherType.SPECIFIC_PRODUCT:
+        prices = get_prices_of_discounted_specific_product(
+            order_or_checkout.lines.all(), voucher
+        )
+    elif voucher.type == VoucherType.PRODUCT:
         prices = get_prices_of_discounted_products(
             order_or_checkout.lines.all(), voucher.products.all()
         )
@@ -719,31 +766,39 @@ def _get_products_voucher_discount(order_or_checkout, voucher):
     return get_products_voucher_discount(voucher, prices)
 
 
-def get_voucher_discount_for_checkout(voucher, checkout):
+def get_voucher_discount_for_checkout(voucher, checkout, discounts=None, taxes=None):
     """Calculate discount value depending on voucher and discount types.
 
     Raise NotApplicable if voucher of given type cannot be applied.
     """
-    if voucher.type == VoucherType.VALUE:
-        return get_value_voucher_discount(voucher, checkout.get_subtotal())
+    if voucher.type == VoucherType.ENTIRE_ORDER:
+        return get_value_voucher_discount(
+            voucher, checkout.get_subtotal(discounts, taxes)
+        )
     if voucher.type == VoucherType.SHIPPING:
-        return _get_shipping_voucher_discount_for_checkout(voucher, checkout)
+        return _get_shipping_voucher_discount_for_checkout(
+            voucher, checkout, discounts, taxes
+        )
     if voucher.type in (
         VoucherType.PRODUCT,
         VoucherType.COLLECTION,
         VoucherType.CATEGORY,
+        VoucherType.SPECIFIC_PRODUCT,
     ):
         return _get_products_voucher_discount(checkout, voucher)
     raise NotImplementedError("Unknown discount type")
 
 
-def get_voucher_for_checkout(checkout, vouchers=None):
+def get_voucher_for_checkout(checkout, vouchers=None, with_lock=False):
     """Return voucher with voucher code saved in checkout if active or None."""
     if checkout.voucher_code is not None:
         if vouchers is None:
-            vouchers = Voucher.objects.active(date=date.today())
+            vouchers = Voucher.objects.active(date=timezone.now())
         try:
-            return vouchers.get(code=checkout.voucher_code)
+            qs = vouchers
+            if with_lock:
+                qs = vouchers.select_for_update()
+            return qs.get(code=checkout.voucher_code)
         except Voucher.DoesNotExist:
             return None
     return None
@@ -758,7 +813,9 @@ def recalculate_checkout_discount(checkout, discounts, taxes):
     voucher = get_voucher_for_checkout(checkout)
     if voucher is not None:
         try:
-            discount = get_voucher_discount_for_checkout(voucher, checkout)
+            discount = get_voucher_discount_for_checkout(
+                voucher, checkout, discounts, taxes
+            )
         except NotApplicable:
             remove_voucher_from_checkout(checkout)
         else:
@@ -781,11 +838,50 @@ def recalculate_checkout_discount(checkout, discounts, taxes):
         remove_voucher_from_checkout(checkout)
 
 
-def add_voucher_to_checkout(voucher, checkout):
+def add_promo_code_to_checkout(
+    checkout: Checkout, promo_code: str, discounts=None, taxes=None
+):
+    """Add gift card or voucher data to checkout.
+
+    Raise InvalidPromoCode if promo code does not match to any voucher or gift card.
+    """
+    if promo_code_is_voucher(promo_code):
+        add_voucher_code_to_checkout(checkout, promo_code, discounts, taxes)
+    elif promo_code_is_gift_card(promo_code):
+        add_gift_card_code_to_checkout(checkout, promo_code)
+    else:
+        raise InvalidPromoCode()
+
+
+def add_voucher_code_to_checkout(
+    checkout: Checkout, voucher_code: str, discounts=None, taxes=None
+):
+    """Add voucher data to checkout by code.
+
+    Raise InvalidPromoCode() if voucher of given type cannot be applied.
+    """
+    try:
+        voucher = Voucher.objects.active(date=timezone.now()).get(code=voucher_code)
+    except Voucher.DoesNotExist:
+        raise InvalidPromoCode()
+    try:
+        add_voucher_to_checkout(checkout, voucher, discounts, taxes)
+    except NotApplicable:
+        raise ValidationError(
+            {"promo_code": "Voucher is not applicable to that checkout."}
+        )
+
+
+def add_voucher_to_checkout(
+    checkout: Checkout, voucher: Voucher, discounts=None, taxes=None
+):
     """Add voucher data to checkout.
 
-    Raise NotApplicable if voucher of given type cannot be applied."""
-    discount_amount = get_voucher_discount_for_checkout(voucher, checkout)
+    Raise NotApplicable if voucher of given type cannot be applied.
+    """
+    discount_amount = get_voucher_discount_for_checkout(
+        voucher, checkout, discounts, taxes
+    )
     checkout.voucher_code = voucher.code
     checkout.discount_name = voucher.name
     checkout.translated_discount_name = (
@@ -802,7 +898,22 @@ def add_voucher_to_checkout(voucher, checkout):
     )
 
 
-def remove_voucher_from_checkout(checkout):
+def remove_promo_code_from_checkout(checkout: Checkout, promo_code: str):
+    """Remove gift card or voucher data from checkout."""
+    if promo_code_is_voucher(promo_code):
+        remove_voucher_code_from_checkout(checkout, promo_code)
+    elif promo_code_is_gift_card(promo_code):
+        remove_gift_card_code_from_checkout(checkout, promo_code)
+
+
+def remove_voucher_code_from_checkout(checkout: Checkout, voucher_code: str):
+    """Remove voucher data from checkout by code."""
+    existing_voucher = get_voucher_for_checkout(checkout)
+    if existing_voucher and existing_voucher.code == voucher_code:
+        remove_voucher_from_checkout(checkout)
+
+
+def remove_voucher_from_checkout(checkout: Checkout):
     """Remove voucher data from checkout."""
     checkout.voucher_code = None
     checkout.discount_name = None
@@ -850,10 +961,15 @@ def clear_shipping_method(checkout):
     checkout.save(update_fields=["shipping_method"])
 
 
-def _process_voucher_data_for_order(checkout):
-    """Fetch, process and return voucher/discount data from checkout."""
-    vouchers = Voucher.objects.active(date=date.today()).select_for_update()
-    voucher = get_voucher_for_checkout(checkout, vouchers)
+def _get_voucher_data_for_order(checkout):
+    """
+    Fetch, process and return voucher/discount data from checkout.
+
+    Careful! It should be called inside a transaction.
+
+    :raises NotApplicable: When the voucher is not applicable in the current checkout.
+    """
+    voucher = get_voucher_for_checkout(checkout, with_lock=True)
 
     if checkout.voucher_code and not voucher:
         msg = pgettext(
@@ -912,8 +1028,101 @@ def _process_user_data_for_order(checkout):
     }
 
 
+def validate_gift_cards(checkout: Checkout):
+    """Check if all gift cards assigned to checkout are available."""
+    if (
+        not checkout.gift_cards.count()
+        == checkout.gift_cards.active(date=date.today()).count()
+    ):
+        msg = pgettext(
+            "Gift card not applicable",
+            "Gift card has expired. Order placement cancelled.",
+        )
+        raise NotApplicable(msg)
+
+
+def create_line_for_order(
+    variant: ProductVariant, quantity: int, discounts, taxes
+) -> OrderLine:
+    """
+    :raises InsufficientStock: when there is not enough items in stock for this variant
+    """
+
+    variant.check_quantity(quantity)
+
+    product_name = variant.display_product()
+    translated_product_name = variant.display_product(translated=True)
+
+    if translated_product_name == product_name:
+        translated_product_name = ""
+
+    line = OrderLine(
+        product_name=product_name,
+        translated_product_name=translated_product_name,
+        product_sku=variant.sku,
+        is_shipping_required=variant.is_shipping_required(),
+        quantity=quantity,
+        variant=variant,
+        unit_price=variant.get_price(discounts, taxes),
+        tax_rate=get_tax_rate_by_name(variant.product.tax_rate, taxes),
+    )
+
+    return line
+
+
+def prepare_order_data(
+    *, checkout: Checkout, tracking_code: str, discounts, taxes
+) -> dict:
+    """
+    Runs checks and returns all the data from a given checkout to create an order.
+
+    :raises NotApplicable InsufficientStock:
+    """
+    order_data = {}
+
+    order_data.update(_process_shipping_data_for_order(checkout, taxes))
+    order_data.update(_process_user_data_for_order(checkout))
+    order_data.update(
+        {
+            "language_code": get_language(),
+            "tracking_client_id": tracking_code,
+            "total": checkout.get_total(discounts, taxes),
+        }
+    )
+
+    order_data["lines"] = [
+        create_line_for_order(
+            variant=line.variant,
+            quantity=line.quantity,
+            discounts=discounts,
+            taxes=taxes,
+        )
+        for line in checkout
+    ]
+
+    # validate checkout gift cards
+    validate_gift_cards(checkout)
+
+    # Get voucher data (last) as they require a transaction
+    order_data.update(_get_voucher_data_for_order(checkout))
+
+    # assign gift cards to the order
+    order_data["total_price_left"] = (
+        checkout.get_subtotal(discounts, taxes)
+        + checkout.get_shipping_price(taxes)
+        - checkout.discount_amount
+    ).gross
+
+    return order_data
+
+
+def abort_order_data(order_data: dict):
+    if "voucher" in order_data:
+        decrease_voucher_usage(order_data["voucher"])
+
+
 @transaction.atomic
-def create_order(checkout: Checkout, tracking_code: str, discounts, taxes, user: User):
+def create_order(*, checkout: Checkout, order_data: dict, user: User) -> Order:
     """Create an order from the checkout.
 
     Each order will get a private copy of both the billing and the shipping
@@ -925,35 +1134,31 @@ def create_order(checkout: Checkout, tracking_code: str, discounts, taxes, user:
     Current user's language is saved in the order so we can later determine
     which language to use when sending email.
     """
-    from ..order.utils import add_variant_to_order
+    from ..product.utils import allocate_stock
+    from ..order.utils import add_gift_card_to_order
 
     order = Order.objects.filter(checkout_token=checkout.token).first()
     if order is not None:
         return order
 
-    order_data = {}
-    order_data.update(_process_voucher_data_for_order(checkout))
-    order_data.update(_process_shipping_data_for_order(checkout, taxes))
-    order_data.update(_process_user_data_for_order(checkout))
-    order_data.update(
-        {
-            "language_code": get_language(),
-            "tracking_client_id": tracking_code,
-            "total": checkout.get_total(discounts, taxes),
-        }
-    )
+    total_price_left = order_data.pop("total_price_left")
+    order_lines = order_data.pop("lines")
 
     order = Order.objects.create(**order_data, checkout_token=checkout.token)
+    order.lines.set(order_lines, bulk=False)
 
-    # create order lines from checkout lines
-    for line in checkout:
-        add_variant_to_order(order, line.variant, line.quantity, discounts, taxes)
+    # allocate stocks from the lines
+    for line in order_lines:  # type: OrderLine
+        variant = line.variant
+        if variant.track_inventory:
+            allocate_stock(variant, line.quantity)
+
+    # Add gift cards to the order
+    for gift_card in checkout.gift_cards.select_for_update():
+        total_price_left = add_gift_card_to_order(order, gift_card, total_price_left)
 
     # assign checkout payments to the order
     checkout.payments.update(order=order)
-
-    # remove checkout after order is created
-    checkout.delete()
 
     # Create the order placed
     events.order_created_event(order=order, user=user)
