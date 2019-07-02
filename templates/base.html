@@ -119,7 +119,7 @@
               <svg data-src="{% static "images/mobile-menu.svg" %}" width="28px" height="20px"/>
             </div>
             <a href="{% url 'home' %}">
-              <svg data-src="{% static "images/logo-light.svg" %}"/>
+               {{ site.settings.translated.header_text }}
             </a>
           </div>
           <div class="col-2 col-md-5 navbar__search static">
