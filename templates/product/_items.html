@@ -14,7 +14,7 @@
                  data-src="{% get_product_image_thumbnail product.get_first_image method="thumbnail" size=300 %}"
                  data-srcset="{% get_product_image_thumbnail product.get_first_image method="thumbnail" size=300 %} 1x, {% get_product_image_thumbnail product.get_first_image method="thumbnail" size=510 %} 2x"
                  alt=""
-                 src="{% placeholder size=255 %}">
+                 src="{% placeholder size=300 %}">
             </div>
           <span class="product-list-item-name" title="{{ product.translated }}">{{ product.translated }}</span>
         </div>
